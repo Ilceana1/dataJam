@@ -1,0 +1,127 @@
+---
+title: "Citi Banamex Income"
+output: html_notebook
+---
+
+
+Librarys
+```{r}
+# Reading
+lapply(c("dplyr", "tidyr", "mice", "VIM", "nnet", "caret", "tidyverse", "corrplot"), require, character.only = TRUE)```
+
+
+Reading
+```{r}
+#
+df_income_na <- read.csv("income_df.csv") %>% 
+  rename(cod_postal = X...codigo_postal) %>% 
+  na.omit() 
+
+df_denue_na <- read.csv("denue_r.csv") %>% 
+  rename(cod_postal = CodPostal) %>% 
+  mutate(nse = 0)```
+
+Missing Data
+```{r}
+# Missing data
+p <- function(x){sum(is.na(x))/length(x)*100}
+apply(df_denue_na,2, p)
+md.pattern(df_denue_na)
+md.pairs(df_denue_na)
+marginplot(df_denue_na[ , c('NSE_2016','cod_postal')]) #imp
+impute <- mice(df_denue_na[, 6:7], m = 3, seed = 123)
+print(impute)
+
+impute$imp$NSE_2016 # Complete Data
+newdata <- complete(impute, 1) %>% 
+  rename(imp_NSE_2016 = NSE_2016, imp_cod_postal = cod_postal) # Distribution of values "observados/imputados"
+stripplot(impute, pch = 20, cex = 1.2)
+df_denue_na <- cbind(df_denue_na, newdata)
+
+df_denue_na <- df_denue_na %>% 
+  select(-NSE_2016, -cod_postal)```
+
+
+Procesing
+```{r}
+df_denue_na <- df_denue_na %>% 
+  mutate(nse = ifelse(imp_NSE_2016 == "A/B+", 10, nse),
+         nse = ifelse(imp_NSE_2016 == "Bm", 9, nse),
+         nse = ifelse(imp_NSE_2016 == "B-", 8, nse),
+         nse = ifelse(imp_NSE_2016 == "C+", 7, nse),
+         nse = ifelse(imp_NSE_2016 == "C-", 6, nse),
+         nse = ifelse(imp_NSE_2016 == "Cm", 5, nse),
+         nse = ifelse(imp_NSE_2016 == "D+", 4, nse),
+         nse = ifelse(imp_NSE_2016 == "D-", 3, nse),
+         nse = ifelse(imp_NSE_2016 == "Dm", 2, nse), 
+         nse = ifelse(imp_NSE_2016 == "E", 1, nse)) 
+
+
+df <- df_denue_na %>% 
+  group_by(imp_cod_postal) %>% 
+  summarise(hog0_2 = sum(Hog0_2), 
+            hog2_4 = sum(Hog2_4),
+            hog4_7 = sum(Hog4_7), 
+            hog7_11 = sum(Hog7_11),
+            hog11_16 = sum(Hog11_16), 
+            hog16_21 = sum(Hog16_21),
+            hog21_41 = sum(Hog21_41),
+            hog41_61 = sum(Hog41_61), 
+            hog61_101 = sum(Hog61_101),
+            hog101_mas = sum(Hog101_mas), 
+            tot_empresas = sum(Tot_empresas),
+            administrativos = sum(Administrativos), 
+            comercio_mayor = sum(Comercio_mayor),
+            comercio_menor = sum(Comercio_menor), 
+            manufactura = sum(Manufactura),
+            primarias = sum(Primarias),
+            restaurantes_hoteles = sum(Restaurantes_Hoteles), 
+            servicios = sum(Servicios),
+            perocup0a5 = sum(Perocup0a5),
+            perocup6a10 = sum(Perocup6a10),
+            perocup11a30 = sum(Perocup11a30), 
+            perocup31a50 = sum(Perocup31a50),
+            perocup31a50 = sum(Perocup31a50), 
+            perocup101a250 = sum(Perocup101a250),
+            perocup251ymas = sum(Perocup251ymas),
+            nse_mean = mean(nse)) %>% 
+  rename(cod_postal = imp_cod_postal)
+
+df_final <- df_income_na %>%
+  left_join(df, by = "cod_postal") %>% 
+  na.omit()```
+
+
+Clasificador
+```{r}
+##PREPARE DATA
+#oneway
+data<-df_final
+data<-data[,-c(1,8)]
+#second way choosing import data from folder#we need the NSP as categorical variable,next steps to change it
+str(data)
+data$Income_Range<-factor(data$Income_Range)
+str(data)#Partition data into training and validation datasets
+set.seed(1234)
+pd<-sample(2,nrow(data),replace=T,prob=c(.8,.2))
+train<-data[pd==1,]
+validate<-data[pd==2,]#Decision tree with party
+install.packages('party')
+library(party)
+tree<-ctree(Income_Range~.,data=train)
+tree
+plot(tree)
+#Predict with probability
+predict(tree,validate,type="prob")
+#Misclassification error for 'train 'data
+tab<-table(predict(tree),train$Income_Range)
+print(tab)
+1-sum(diag(tab))/sum(tab)#Misclassification error with 'validate'data
+testpred<-predict(tree,newdata=validate)
+
+tab1<-table(testpred,validate$Income_Range)
+print(tab1)
+1-sum(diag(tab1))/sum(tab1)
+```
+
+Poder de predicción del 60%, trainign test 80%
